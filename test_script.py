@@ -2,47 +2,65 @@ import torch
 import pandas as pd
 from transformers import pipeline
 from tqdm import tqdm
-import time
 import os
+import time
 
-# 1. SETUP DEVICE (Apple Silicon GPU)
-if torch.backends.mps.is_available():
-    device = torch.device("mps")
-    print("Using GPU (MPS)")
-else:
-    device = torch.device("cpu")
-    print("GPU not found, using CPU (Slow!)")
+# 1. UNIVERSAL DEVICE DETECTION
+def get_device():
+    # Check for Mac GPU
+    if torch.backends.mps.is_available():
+        print("🚀 Device: Mac GPU (MPS) detected.")
+        return "mps"
+    
+    # Check for Windows AMD GPU (DirectML)
+    try:
+        import torch_directml
+        print("🚀 Device: Windows AMD GPU (DirectML) detected.")
+        return torch_directml.device()
+    except ImportError:
+        pass
+    
+    print("⚠️ Device: GPU not found. Falling back to CPU.")
+    return "cpu"
 
-# 2. LOAD DATA
-file_path = 'data/Suicide_Detection.csv'
-checkpoint_path = 'severity_checkpoints.csv'
+device = get_device()
 
-df = pd.read_csv(file_path)
+# 2. CONFIGURATION
+INPUT_FILE = "data/Suicide_Detection.csv"
+OUTPUT_FILE = "Suicide_Severity_Final.csv"
+CHECKPOINT_FILE = "severity_progress.csv"
+MODEL_NAME = "valhalla/distilbart-mnli-12-1" # Smaller, faster model
+
+# Set batch size based on platform
+# Windows DirectML often prefers smaller batches (4-8), Mac can handle 12+
+BATCH_SIZE = 8 
+
+# 3. DATA LOADING & RESUME LOGIC
+df = pd.read_csv(INPUT_FILE)
 if 'Unnamed: 0' in df.columns:
     df = df.drop(columns=['Unnamed: 0'])
 
-# Prepare the dataframes
 suicide_df = df[df['class'] == 'suicide'].copy()
 non_suicide_df = df[df['class'] == 'non-suicide'].copy()
 non_suicide_df['severity'] = 0
 
-# 3. RESUME LOGIC (If you have to restart)
-if os.path.exists(checkpoint_path):
-    processed_df = pd.read_csv(checkpoint_path)
-    processed_ids = set(processed_df['text'].tolist()) # Using text as ID for simplicity
-    print(f"Resuming: {len(processed_df)} rows already labeled.")
-    # Filter out what we already did
-    suicide_to_process = suicide_df[~suicide_df['text'].isin(processed_ids)]
+if os.path.exists(CHECKPOINT_FILE):
+    processed_df = pd.read_csv(CHECKPOINT_FILE)
+    done_count = len(processed_df)
+    print(f"🔄 Resuming from row {done_count}")
+    suicide_to_do = suicide_df.iloc[done_count:]
 else:
     processed_df = pd.DataFrame()
-    suicide_to_process = suicide_df
+    suicide_to_do = suicide_df
 
 # 4. INITIALIZE MODEL
-# Using a slightly faster model that works well on Mac
-model_name = "facebook/bart-large-mnli" 
+print(f"📦 Loading {MODEL_NAME}...")
+
+# Note: For DirectML, we sometimes need to load the model manually 
+# if the pipeline 'device' argument acts up.
 classifier = pipeline("zero-shot-classification", 
-                      model=model_name, 
-                      device="mps") # Explicitly set to mps
+                      model=MODEL_NAME, 
+                      device=device)
 
 labels = [
     "No suicidal risk",                         # 0
@@ -53,57 +71,50 @@ labels = [
     "Immediate crisis or final goodbye"         # 5
 ]
 
-# 5. GENERATOR FOR STREAMING
+# 5. STREAMING GENERATOR
 def stream_data(texts):
     for text in texts:
-        yield str(text)[:1000] # Truncate for speed
+        yield str(text)[:1000] # Truncate for performance
 
-texts_list = suicide_to_process['text'].tolist()
-total_to_do = len(texts_list)
+texts_list = suicide_to_do['text'].tolist()
 
-print(f"\nTotal left to process: {total_to_do}")
+print("\n" + "="*40)
+print(f"STARTING PROCESSING ({len(texts_list)} rows)")
 print("="*40)
 
-# 6. PROCESSING LOOP
-batch_results = []
-start_time = time.time()
-
+batch_buffer = []
 try:
-    # Use a small batch size for Mac stability
     results_gen = classifier(
         stream_data(texts_list),
         candidate_labels=labels,
         hypothesis_template="This person is expressing {}.",
-        batch_size=4 
+        batch_size=BATCH_SIZE
     )
 
-    for i, out in enumerate(tqdm(results_gen, total=total_to_do, desc="MPS Labeling")):
+    for i, out in enumerate(tqdm(results_gen, total=len(texts_list), desc="Labeling")):
         top_label = out['labels'][0]
         score = labels.index(top_label)
         
-        # Create a tiny dataframe for this one row
-        current_row = suicide_to_process.iloc[[i]].copy()
-        current_row['severity'] = score
-        batch_results.append(current_row)
+        row_data = suicide_to_do.iloc[[i]].copy()
+        row_data['severity'] = score
+        batch_buffer.append(row_data)
 
-        # Every iteration "Alive" feedback
-        if i % 1 == 0:
-            print(f"\r[ALIVE] Row {i+1}/{total_to_do} | Score: {score}", end="")
+        # Immediate feedback
+        print(f"\r[ALIVE] Last Score: {score} | Row: {i+1}", end="")
 
-        # Save Checkpoint every 100 rows
+        # Save checkpoint every 100 rows
         if (i + 1) % 100 == 0:
-            checkpoint_df = pd.concat([processed_df] + batch_results)
-            checkpoint_df.to_csv(checkpoint_path, index=False)
-            # We don't want to re-save the whole thing every time, 
-            # so we keep processed_df growing
-            processed_df = checkpoint_df
-            batch_results = [] 
+            processed_df = pd.concat([processed_df] + batch_buffer)
+            processed_df.to_csv(CHECKPOINT_FILE, index=False)
+            batch_buffer = []
 
 except KeyboardInterrupt:
-    print("\nPaused by user. Progress saved.")
+    print("\n\n🛑 Paused by user.")
 
-# 7. FINAL MERGE
-final_suicide = pd.concat([processed_df] + batch_results)
-final_all = pd.concat([final_suicide, non_suicide_df])
-final_all.to_csv("Final_Labeled_Suicide_Data.csv", index=False)
-print("\n\nMISSION COMPLETE: Data saved to Final_Labeled_Suicide_Data.csv")
+# 6. FINAL SAVE
+if batch_buffer:
+    processed_df = pd.concat([processed_df] + batch_buffer)
+
+final_all = pd.concat([processed_df, non_suicide_df])
+final_all.to_csv(OUTPUT_FILE, index=False)
+print(f"\n✅ DONE! File saved: {OUTPUT_FILE}")
