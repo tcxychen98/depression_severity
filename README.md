@@ -195,21 +195,11 @@ This repository also includes a lightweight **Streamlit application** to demonst
 
 ### Example Screenshots
 
+![App Input/Output Example](img/lvl1.png)
 
+![Severe Ideation Detected](img/lvl4_warning.png)
 
-Suggested images:
-
-* App landing page
-* Example Reddit text pasted into the input field
-* Severity score output (0–5)
-* Warning message displayed for scores > 3
-
-You can place images in a `/assets` or `/images` folder and reference them here, for example:
-
-```markdown
-![App Input Example](images/app_input.png)
-![Severity Output Example](images/app_output.png)
-```
+![No Risk](img/no_risk.png)
 
 ---
 
