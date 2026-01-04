@@ -8,23 +8,8 @@ st.set_page_config(page_title="Suicide Severity Detector", page_icon="🎗️")
 
 @st.cache_resource
 def load_model():
-    model_path = "./final_severity_model"
-    device = 0 if torch.cuda.is_available() else -1
-    
-    # Manually load the tokenizer to apply the regex fix
-    tokenizer = AutoTokenizer.from_pretrained(
-        model_path, 
-        fix_mistral_regex=True, 
-        use_fast=False
-    )
-    
-    # Pass the fixed tokenizer into the pipeline
-    return pipeline(
-        "text-classification", 
-        model=model_path, 
-        tokenizer=tokenizer, 
-        device=device
-    )
+    model_id = "tcxy98/suicide-severity-deberta"
+    return pipeline("text-classification", model=model_id, device=-1)
 
 classifier = load_model()
 
