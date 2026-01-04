@@ -87,9 +87,6 @@ pyzmq==27.1.0
 referencing==0.37.0
 regex==2025.11.3
 requests==2.32.5
-rocm==7.11.0a20260103
-rocm-sdk-core==7.11.0a20260103
-rocm-sdk-libraries-gfx120X-all==7.11.0a20260103
 rpds-py==0.30.0
 safetensors==0.7.0
 scikit-learn==1.8.0
@@ -106,10 +103,9 @@ tenacity==9.1.2
 threadpoolctl==3.6.0
 tokenizers==0.22.1
 toml==0.10.2
-torch==2.9.1+rocm7.11.0a20260103
-torch-directml==0.2.5.dev240914
-torchaudio==2.9.0+rocm7.11.0a20260103
-torchvision==0.24.0+rocm7.11.0a20260103
+torch==2.9.1
+torchaudio==2.9.0
+torchvision==0.24.0
 tornado==6.5.4
 tqdm==4.67.1
 traitlets==5.14.3

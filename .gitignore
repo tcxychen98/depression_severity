@@ -11,6 +11,7 @@ __pycache__/
 .venv/
 .env
 .ipynb_checkpoints/
+requirements_train.txt
 
 # System files
 .DS_Store
